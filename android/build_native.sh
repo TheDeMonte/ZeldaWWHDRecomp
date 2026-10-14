@@ -11,8 +11,10 @@
 #        ~/Library/Android/sdk, ~/Android/Sdk, C:/Android/Sdk), NDK_VERSION (default 30.0.16248370),
 #        JOBS (default 8), GEN_DIR (default build/gen), OUT (default android/build),
 #        ABI (default arm64-v8a; x86_64 for emulator CI),
-#        CPU (default generic: any arm64 phone. CPU=oryon-1 tunes for the Snapdragon 8 Elite, e.g.
-#        Galaxy S25, where the port was measured; the APK then runs only on that CPU family)
+#        CPU (default generic: any arm64 phone.
+#             CPU=dimensity-8300  tunes for Dimensity 8300/8300U + Mali-G615 MC6.
+#             CPU=oryon-1 tunes for the Snapdragon 8 Elite, e.g. Galaxy S25, where the port was measured.
+#        MALI_GPU (default on: MALI_GPU=0 disables Mali-specific GPU setup).
 # The game code in build/gen is generated from your own game (tools/recomp/recomp.py) and stays on
 # your machine; the APK built from it contains it and must not be distributed. CI builds this with
 # placeholder code (tools/recomp/stubgen.py) only to check that it compiles.
@@ -42,16 +44,26 @@ cmake="$(command -v cmake || true)"
 ninja="$(command -v ninja || true)"
 [ -n "$ninja" ] || ninja="$(dirname "$cmake")/ninja$exe"
 out="${OUT:-$here/build}/game"
+# CPU tuning for Dimensity 8300/8300U (Cortex-A715 + Cortex-A510):
+#   CPU=dimensity-8300  - optimize for Mali-G615 MC6 / Dimensity 8300 hardware (Cortex-A715)
+#   CPU=generic         - any arm64 device (default)
+#   CPU=oryon-1         - Snapdragon 8 Elite (Cortex-X4 + Cortex-A720)
 cpu="${CPU:-generic}"
 flags=()
-if [ "$cpu" != generic ]; then flags=("-DCMAKE_C_FLAGS=-mcpu=$cpu" "-DCMAKE_CXX_FLAGS=-mcpu=$cpu"); fi
+if [ "$cpu" = dimensity-8300 ]; then
+    # Dimensity 8300U: Cortex-A715 (p-core) + Cortex-A510 (e-core), Armv9.2-A
+    flags=("-DCMAKE_C_FLAGS=-mcpu=cortex-a715+crc+dotprod+sve2" "-DCMAKE_CXX_FLAGS=-mcpu=cortex-a715+crc+dotprod+sve2")
+    echo "== CPU tuned for Dimensity 8300/8300U (Cortex-A715 + Mali-G615 MC6)"
+elif [ "$cpu" != generic ]; then
+    flags=("-DCMAKE_C_FLAGS=-mcpu=$cpu" "-DCMAKE_CXX_FLAGS=-mcpu=$cpu")
+fi
 
 echo "== game (libmain.so), NDK $(basename "$ndk"), CPU $cpu"
 mkdir -p "$out"
 "$cmake" -S "$root" -B "$out" -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" \
     "-DCMAKE_TOOLCHAIN_FILE=$ndk/build/cmake/android.toolchain.cmake" "-DANDROID_ABI=$abi" \
     "-DANDROID_PLATFORM=android-$api" -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=Release \
-    -DWWHD_BUNDLED_DEPS=ON "-DGEN_DIR=${GEN_DIR:-$root/build/gen}" ${flags[@]+"${flags[@]}"} > "$out.log"
+    -DWWHD_BUNDLED_DEPS=ON -DWWHD_DISABLE_ADRENO=ON "-DGEN_DIR=${GEN_DIR:-$root/build/gen}" ${flags[@]+"${flags[@]}"} > "$out.log"
 "$cmake" --build "$out" -j "$jobs" --target wwhd wwhd_yaz0 >> "$out.log" 2>&1 || { tail -40 "$out.log"; exit 1; }
 libs="$here/app/libs/$abi"
 mkdir -p "$libs"
@@ -61,12 +73,9 @@ cp "$(find "$out/_deps" -name libSDL3.so -print -quit)" "$libs/"
 # the Yaz0 decoder shaderprep.py loads (ctypes) to prepare shaders on the phone
 "$bin/bin/llvm-strip$exe" --strip-unneeded "$out/libyaz0.so" -o "$libs/libyaz0.so"
 cp "$bin/sysroot/usr/lib/$target_triple/libc++_shared.so" "$libs/"
-# libadrenotools loads these hooks by soname from ApplicationInfo.nativeLibraryDir.
-if [ "$abi" = arm64-v8a ]; then  # libadrenotools is arm64-only
-    for hook in main_hook hook_impl file_redirect_hook gsl_alloc_hook; do
-        hook_file="$(find "$out/_deps" -name "lib${hook}.so" -print -quit)"
-        [ -n "$hook_file" ] || { echo "missing AdrenoTools hook: $hook"; exit 1; }
-        cp "$hook_file" "$libs/"
-    done
+# Mali GPU (Dimensity 8300U = Mali-G615 MC6): use system Vulkan driver, no custom GPU driver hooks.
+# libadrenotools hooks are Adreno-specific (Snapdragon) and must NOT be copied for Mali devices.
+if [ "$abi" = arm64-v8a ]; then
+    echo "== Mali GPU build: skipping adrenotools hooks (not needed for Mali)"
 fi
 ls -la "$libs"

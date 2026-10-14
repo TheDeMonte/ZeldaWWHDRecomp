@@ -794,11 +794,15 @@ if(ANDROID)
     FetchContent_MakeAvailable(wwhd_adrenotools)
   endfunction()
   # libadrenotools supports arm64 only (Adreno devices); x86_64 builds (emulator CI) go without it.
-  if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+  # WWHD_DISABLE_ADRENO=ON disables adrenotools for Mali/PowerVR/other non-Adreno GPUs.
+  option(WWHD_DISABLE_ADRENO "Disable adrenotools (Mali/PowerVR GPUs, Dimensity/Exynos chipsets)" OFF)
+  if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a" AND NOT WWHD_DISABLE_ADRENO)
     wwhd_add_adrenotools()
     target_link_libraries(wwhd PRIVATE adrenotools)
     target_compile_definitions(wwhd PRIVATE WWHD_ADRENOTOOLS=1)
     add_dependencies(wwhd main_hook hook_impl file_redirect_hook gsl_alloc_hook)
+  elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a" AND WWHD_DISABLE_ADRENO)
+    message(STATUS "AdrenoTools disabled (WWHD_DISABLE_ADRENO=ON): Mali/PowerVR/other non-Adreno GPU")
   endif()
 endif()
 

@@ -68,7 +68,7 @@ android {
     defaultConfig.manifestPlaceholders = [appIcon: gameIcon ? '@mipmap/ic_game' : '@mipmap/ic_launcher']
     packaging {
         jniLibs {
-            useLegacyPackaging = true  // libadrenotools needs extracted hooks in nativeLibraryDir
+            useLegacyPackaging = true
             keepDebugSymbols += ['**/libmain.so']  // stripped by build_native.sh already
             if (toolchainPackage != null || extractorPackage != null) keepDebugSymbols += ['**/libwwhd-*.so']  // preserve pinned tool bytes
         }
